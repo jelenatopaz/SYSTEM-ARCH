@@ -1,0 +1,573 @@
+<?php
+if (session_status() === PHP_SESSION_NONE) { session_start(); }
+require_once "db.php";
+
+if (!isset($_SESSION['admin_id'])) {
+    header("Location: admin_login.php");
+    exit;
+}
+
+// ── Handle new announcement POST ──
+$ann_error   = "";
+$ann_success = "";
+
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['announcement_content'])) {
+    $title   = trim($_POST['announcement_title']   ?? "");
+    $content = trim($_POST['announcement_content'] ?? "");
+
+    if (empty($content)) {
+        $ann_error = "Announcement content cannot be empty.";
+    } else {
+        $stmt = $pdo->prepare("INSERT INTO announcements (title, content, created_at) VALUES (?, ?, NOW())");
+        $stmt->execute([$title, $content]);
+        $ann_success = "Announcement posted!";
+    }
+}
+
+// ── Stats ──
+$total_students   = $pdo->query("SELECT COUNT(*) FROM students")->fetchColumn();
+$currently_sitin  = $pdo->query("SELECT COUNT(*) FROM sit_in_records WHERE time_out IS NULL")->fetchColumn();
+$total_sitin      = $pdo->query("SELECT COUNT(*) FROM sit_in_records")->fetchColumn();
+
+// ── Language breakdown for pie chart ──
+$lang_rows = $pdo->query("
+    SELECT purpose, COUNT(*) as cnt
+    FROM sit_in_records
+    GROUP BY purpose
+")->fetchAll(PDO::FETCH_ASSOC);
+
+// ── Announcements ──
+$announcements = $pdo->query("SELECT * FROM announcements ORDER BY created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard — CCS Sit-in Monitoring</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --purple:      #4a2080;
+            --purple-dark: #2e1260;
+            --purple-light:#6a3ab0;
+            --gold:        #f0a500;
+            --gold-light:  #ffd060;
+            --white:       #ffffff;
+            --gray:        #f5f3fa;
+            --text-dark:   #1a1030;
+            --text-muted:  #7a6a9a;
+        }
+
+        body {
+            font-family: 'Lato', sans-serif;
+            background: var(--gray);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ══════════════════════════════
+           NAVBAR
+        ══════════════════════════════ */
+        nav {
+            background: var(--purple-dark);
+            padding: 0 1.5rem;
+            height: 52px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+
+        .nav-brand {
+            font-family: 'Cinzel', serif;
+            font-size: 0.9rem;
+            color: var(--gold);
+            letter-spacing: 0.04em;
+            white-space: nowrap;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 0.1rem;
+            list-style: none;
+            flex-wrap: wrap;
+        }
+
+        .nav-links a {
+            color: rgba(255,255,255,0.85);
+            text-decoration: none;
+            font-size: 0.8rem;
+            padding: 0.35rem 0.65rem;
+            border-radius: 5px;
+            transition: background 0.2s, color 0.2s;
+            white-space: nowrap;
+        }
+
+        .nav-links a:hover,
+        .nav-links a.active {
+            background: rgba(240,165,0,0.15);
+            color: var(--gold-light);
+        }
+
+        .btn-logout {
+            background: linear-gradient(135deg, var(--gold), var(--gold-light));
+            color: var(--text-dark);
+            font-weight: 700;
+            border: none;
+            padding: 0.35rem 1rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            font-family: 'Lato', sans-serif;
+            transition: transform 0.15s, box-shadow 0.15s;
+            margin-left: 0.4rem;
+            box-shadow: 0 2px 8px rgba(240,165,0,0.3);
+        }
+
+        .btn-logout:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(240,165,0,0.4);
+        }
+
+        /* ══════════════════════════════
+           MAIN
+        ══════════════════════════════ */
+        main {
+            flex: 1;
+            padding: 1.75rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        /* ── 2-column grid ── */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        /* ══════════════════════════════
+           PANEL
+        ══════════════════════════════ */
+        .panel {
+            background: white;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 4px 24px rgba(74,32,128,0.10), 0 1px 4px rgba(0,0,0,0.04);
+            animation: slideUp 0.5s cubic-bezier(0.22,1,0.36,1) both;
+        }
+
+        .panel:nth-child(2) { animation-delay: 0.07s; }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .panel-header {
+            background: linear-gradient(135deg, var(--purple-dark) 0%, var(--purple) 60%, var(--purple-light) 100%);
+            color: white;
+            padding: 0.75rem 1.25rem;
+            font-family: 'Cinzel', serif;
+            font-size: 0.82rem;
+            letter-spacing: 0.06em;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            position: relative;
+        }
+
+        .panel-header::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--gold), transparent);
+        }
+
+        .panel-body { padding: 1.5rem; }
+
+        /* ══════════════════════════════
+           STATISTICS PANEL
+        ══════════════════════════════ */
+        .stat-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.6rem 0.9rem;
+            background: var(--gray);
+            border-radius: 8px;
+            border-left: 4px solid var(--purple);
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: var(--text-dark);
+            font-weight: 600;
+        }
+
+        .stat-value {
+            font-family: 'Cinzel', serif;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--purple);
+        }
+
+        .stat-row:nth-child(2) { border-left-color: var(--gold); }
+        .stat-row:nth-child(2) .stat-value { color: var(--gold); }
+
+        .stat-row:nth-child(3) { border-left-color: var(--purple-light); }
+        .stat-row:nth-child(3) .stat-value { color: var(--purple-light); }
+
+        .chart-wrapper {
+            position: relative;
+            height: 260px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .chart-placeholder {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            padding: 2rem;
+        }
+
+        .chart-placeholder span {
+            display: block;
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        /* ══════════════════════════════
+           ANNOUNCEMENT PANEL
+        ══════════════════════════════ */
+        .ann-form-label {
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+            margin-bottom: 0.4rem;
+            display: block;
+        }
+
+        .ann-input {
+            width: 100%;
+            padding: 0.65rem 0.9rem;
+            border: 1.5px solid #ddd6f0;
+            border-radius: 8px;
+            font-family: 'Lato', sans-serif;
+            font-size: 0.875rem;
+            color: var(--text-dark);
+            background: var(--gray);
+            outline: none;
+            margin-bottom: 0.75rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .ann-input:focus {
+            border-color: var(--purple-light);
+            background: white;
+            box-shadow: 0 0 0 3px rgba(106,58,176,0.1);
+        }
+
+        textarea.ann-input {
+            min-height: 90px;
+            resize: vertical;
+        }
+
+        .btn-submit {
+            background: linear-gradient(135deg, var(--purple), var(--purple-light));
+            color: white;
+            border: none;
+            padding: 0.55rem 1.5rem;
+            border-radius: 8px;
+            font-family: 'Lato', sans-serif;
+            font-size: 0.875rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+            box-shadow: 0 3px 12px rgba(74,32,128,0.3);
+        }
+
+        .btn-submit:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 5px 16px rgba(74,32,128,0.4);
+        }
+
+        .alert {
+            padding: 0.65rem 0.9rem;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            margin-bottom: 1rem;
+        }
+
+        .alert-error   { background: #fdecea; border-left: 4px solid #e53935; color: #b71c1c; }
+        .alert-success { background: #e8f5e9; border-left: 4px solid #4caf50; color: #2e7d32; }
+
+        /* Divider between form and list */
+        .ann-divider {
+            border: none;
+            border-top: 2px solid var(--gray);
+            margin: 1.5rem 0 1.25rem;
+        }
+
+        .posted-title {
+            font-family: 'Cinzel', serif;
+            font-size: 1rem;
+            color: var(--purple-dark);
+            margin-bottom: 1rem;
+        }
+
+        .announcement-item {
+            padding: 0.85rem 0;
+            border-bottom: 1px solid rgba(74,32,128,0.07);
+        }
+
+        .announcement-item:last-child { border-bottom: none; }
+
+        .announcement-meta {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            margin-bottom: 0.35rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .announcement-meta::before {
+            content: '';
+            display: inline-block;
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: var(--gold);
+            flex-shrink: 0;
+        }
+
+        .announcement-title-text {
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: var(--purple-dark);
+            margin-bottom: 0.25rem;
+        }
+
+        .announcement-content {
+            font-size: 0.83rem;
+            color: var(--text-muted);
+            line-height: 1.55;
+        }
+
+        .no-announcements {
+            text-align: center;
+            padding: 1.5rem 0;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        /* ══════════════════════════════
+           FOOTER
+        ══════════════════════════════ */
+        footer {
+            background: var(--purple-dark);
+            color: rgba(255,255,255,0.45);
+            text-align: center;
+            padding: 1rem;
+            font-size: 0.8rem;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid { grid-template-columns: 1fr; }
+            nav { flex-wrap: wrap; height: auto; padding: 0.5rem 1rem; gap: 0.5rem; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ==================== NAVBAR ==================== -->
+<nav>
+    <span class="nav-brand">College of Computer Studies Admin</span>
+    <ul class="nav-links">
+        <li><a href="admin_dashboard.php" class="active">Home</a></li>
+        <li><a href="admin_search.php">Search</a></li>
+        <li><a href="admin_students.php">Students</a></li>
+        <li><a href="admin_sitin.php">Sit-in</a></li>
+        <li><a href="admin_current_sitin.php">View Sit-in Records</a></li>
+        <li><a href="admin_sitin_reports.php">Sit-in Reports</a></li>
+        <li><a href="admin_feedback.php">Feedback Reports</a></li>
+        <li><a href="admin_reservation.php">Reservation</a></li>
+        <li>
+            <form method="POST" action="admin_logout.php" style="display:inline;">
+                <button type="submit" class="btn-logout">Log out</button>
+            </form>
+        </li>
+    </ul>
+</nav>
+
+<!-- ==================== MAIN ==================== -->
+<main>
+    <div class="dashboard-grid">
+
+        <!-- ── LEFT: Statistics ── -->
+        <div class="panel">
+            <div class="panel-header">
+                📊 Statistics
+            </div>
+            <div class="panel-body">
+
+                <div class="stat-grid">
+                    <div class="stat-row">
+                        <span class="stat-label">Students Registered</span>
+                        <span class="stat-value"><?= (int)$total_students ?></span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Currently Sit-in</span>
+                        <span class="stat-value"><?= (int)$currently_sitin ?></span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Total Sit-ins</span>
+                        <span class="stat-value"><?= (int)$total_sitin ?></span>
+                    </div>
+                </div>
+
+                <!-- Pie Chart -->
+                <div class="chart-wrapper">
+                    <?php if (empty($lang_rows)): ?>
+                        <div class="chart-placeholder">
+                            <span>📉</span>
+                            No sit-in data yet to display chart.
+                        </div>
+                    <?php else: ?>
+                        <canvas id="langChart"></canvas>
+                    <?php endif; ?>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ── RIGHT: Announcements ── -->
+        <div class="panel">
+            <div class="panel-header">
+                📢 Announcement
+            </div>
+            <div class="panel-body">
+
+                <?php if (!empty($ann_error)): ?>
+                    <div class="alert alert-error"><?= htmlspecialchars($ann_error) ?></div>
+                <?php endif; ?>
+                <?php if (!empty($ann_success)): ?>
+                    <div class="alert alert-success">✅ <?= htmlspecialchars($ann_success) ?></div>
+                <?php endif; ?>
+
+                <!-- Post form -->
+                <form method="POST" action="admin_dashboard.php">
+                    <label class="ann-form-label" for="ann_title">Title (optional)</label>
+                    <input type="text" id="ann_title" name="announcement_title"
+                        class="ann-input" placeholder="Announcement title...">
+
+                    <label class="ann-form-label" for="ann_content">New Announcement <span style="color:#e53935;">*</span></label>
+                    <textarea id="ann_content" name="announcement_content"
+                        class="ann-input" placeholder="Write your announcement here..."></textarea>
+
+                    <button type="submit" class="btn-submit">Submit</button>
+                </form>
+
+                <hr class="ann-divider">
+                <p class="posted-title">Posted Announcement</p>
+
+                <?php if (empty($announcements)): ?>
+                    <p class="no-announcements">No announcements posted yet.</p>
+                <?php else: ?>
+                    <?php foreach ($announcements as $ann): ?>
+                        <div class="announcement-item">
+                            <p class="announcement-meta">
+                                CCS Admin &nbsp;|&nbsp; <?= date('Y-M-d', strtotime($ann['created_at'])) ?>
+                            </p>
+                            <?php if (!empty($ann['title'])): ?>
+                                <p class="announcement-title-text"><?= htmlspecialchars($ann['title']) ?></p>
+                            <?php endif; ?>
+                            <p class="announcement-content">
+                                <?= nl2br(htmlspecialchars($ann['content'])) ?>
+                            </p>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+
+            </div>
+        </div>
+
+    </div>
+</main>
+
+<!-- ==================== FOOTER ==================== -->
+<footer>
+    &copy; 2026 College of Computer Studies &mdash; University of Cebu
+</footer>
+
+<!-- ── Chart.js Pie Chart ── -->
+<?php if (!empty($lang_rows)): ?>
+<script>
+    const langData = <?= json_encode($lang_rows) ?>;
+    const labels   = langData.map(r => r.purpose || 'Other');
+    const counts   = langData.map(r => parseInt(r.cnt));
+    const colors   = [
+        '#4a2080','#f0a500','#6a3ab0','#ffd060',
+        '#2e1260','#e57373','#64b5f6','#81c784',
+        '#ffb74d','#ba68c8'
+    ];
+
+    const ctx = document.getElementById('langChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: counts,
+                backgroundColor: colors.slice(0, labels.length),
+                borderColor: '#fff',
+                borderWidth: 2,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: {
+                        font: { family: 'Lato', size: 11 },
+                        color: '#1a1030',
+                        boxWidth: 14,
+                        padding: 10,
+                    }
+                }
+            }
+        }
+    });
+</script>
+<?php endif; ?>
+
+</body>
+</html>
