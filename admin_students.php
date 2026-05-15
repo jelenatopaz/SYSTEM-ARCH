@@ -139,24 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_student_id'])) {
 </head>
 <body>
 
-<nav>
-    <span class="nav-brand">College of Computer Studies Admin</span>
-    <ul class="nav-links">
-        <li><a href="admin_dashboard.php">Home</a></li>
-        <li><a href="admin_search.php">Search</a></li>
-        <li><a href="admin_students.php" class="active">Students</a></li>
-        <li><a href="admin_sitin.php">Sit-in</a></li>
-        <li><a href="admin_current_sitin.php">View Sit-in Records</a></li>
-        <li><a href="admin_sitin_reports.php">Sit-in Reports</a></li>
-        <li><a href="admin_feedback.php">Feedback Reports</a></li>
-        <li><a href="admin_reservation.php">Reservation</a></li>
-        <li>
-            <form method="POST" action="admin_logout.php" style="display:inline;">
-                <button type="submit" class="btn-logout">Log out</button>
-            </form>
-        </li>
-    </ul>
-</nav>
+<?php $active_page = 'students'; include 'admin_nav.php'; ?>
 
 <main>
     <h1>Students Information</h1>

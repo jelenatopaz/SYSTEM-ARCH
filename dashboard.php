@@ -8,6 +8,55 @@ if (!isset($_SESSION['student_id'])) {
 }
 
 $announcements = $pdo->query("SELECT * FROM announcements ORDER BY created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+
+// ── Fetch sit-in history (last 5) ──
+$sitin_history = [];
+if (!empty($_SESSION['student_id'])) {
+    try {
+        $stmt_h = $pdo->prepare("
+            SELECT purpose, lab, time_in, time_out
+            FROM sit_in_records
+            WHERE student_id = ?
+            ORDER BY time_in DESC
+            LIMIT 5
+        ");
+        $stmt_h->execute([$_SESSION['student_id']]);
+        $sitin_history = $stmt_h->fetchAll(PDO::FETCH_ASSOC);
+    } catch(Exception $e) { $sitin_history = []; }
+}
+
+// ── Fetch student points ──
+$student_points = 0;
+$reward_logs = [];
+if (!empty($_SESSION['student_id'])) {
+    try {
+        $stmt = $pdo->prepare("SELECT points FROM students WHERE id = ?");
+        $stmt->execute([$_SESSION['student_id']]);
+        $student_points = (int)($stmt->fetchColumn() ?? 0);
+    } catch(Exception $e) { $student_points = 0; }
+
+    // Try to get reward log history
+    try {
+        $stmt2 = $pdo->prepare("SELECT description, points, created_at FROM reward_logs WHERE student_id = ? ORDER BY created_at DESC LIMIT 10");
+        $stmt2->execute([$_SESSION['student_id']]);
+        $reward_logs = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+    } catch(Exception $e) { $reward_logs = []; }
+}
+
+// Determine tier
+function getRewardTier($pts) {
+    if ($pts >= 100) return ['name'=>'Platinum', 'icon'=>'💎', 'range'=>'100+ pts', 'key'=>'platinum'];
+    if ($pts >= 50)  return ['name'=>'Gold',     'icon'=>'🥇', 'range'=>'50–99 pts', 'key'=>'gold'];
+    if ($pts >= 20)  return ['name'=>'Silver',   'icon'=>'🥈', 'range'=>'20–49 pts', 'key'=>'silver'];
+    return ['name'=>'Bronze', 'icon'=>'🥉', 'range'=>'0–19 pts', 'key'=>'bronze'];
+}
+$tiers = [
+    ['name'=>'Platinum','icon'=>'💎','range'=>'100+ pts','key'=>'platinum'],
+    ['name'=>'Gold',    'icon'=>'🥇','range'=>'50–99 pts','key'=>'gold'],
+    ['name'=>'Silver',  'icon'=>'🥈','range'=>'20–49 pts','key'=>'silver'],
+    ['name'=>'Bronze',  'icon'=>'🥉','range'=>'0–19 pts', 'key'=>'bronze'],
+];
+$current_tier = getRewardTier($student_points);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -175,6 +224,224 @@ $announcements = $pdo->query("SELECT * FROM announcements ORDER BY created_at DE
             grid-template-columns: 270px 1fr 1fr;
             gap: 1.5rem;
             align-items: start;
+        }
+
+        /* ══════════════════════════════
+           REWARDS PANEL
+        ══════════════════════════════ */
+        .points-hero {
+            text-align: center;
+            padding: 1rem 0 1.25rem;
+        }
+
+        .points-circle {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--purple), var(--purple-light));
+            border: 4px solid var(--gold);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 0.75rem;
+            box-shadow: 0 6px 20px rgba(74,32,128,0.3), 0 0 0 6px rgba(240,165,0,0.12);
+        }
+
+        .points-number {
+            font-family: 'Cinzel', serif;
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--gold);
+            line-height: 1;
+        }
+
+        .points-label {
+            font-size: 0.62rem;
+            color: rgba(255,255,255,0.75);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-top: 2px;
+        }
+
+        .points-subtitle {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .rewards-divider {
+            width: 50px;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--gold), transparent);
+            margin: 0.75rem auto 1.25rem;
+        }
+
+        .rewards-tier {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.6rem 0.9rem;
+            border-radius: 10px;
+            background: var(--gray);
+            margin-bottom: 0.5rem;
+            border-left: 4px solid transparent;
+            transition: transform 0.15s;
+        }
+
+        .rewards-tier.active-tier {
+            background: linear-gradient(90deg, rgba(74,32,128,0.08), rgba(240,165,0,0.06));
+            border-left-color: var(--gold);
+        }
+
+        .tier-icon { font-size: 1.4rem; }
+
+        .tier-info { flex: 1; }
+
+        .tier-name {
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: var(--text-dark);
+        }
+
+        .tier-range {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+        }
+
+        .tier-badge {
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 0.2rem 0.55rem;
+            border-radius: 20px;
+            background: var(--gold);
+            color: var(--text-dark);
+        }
+
+        .rewards-history-title {
+            font-family: 'Cinzel', serif;
+            font-size: 0.78rem;
+            color: var(--purple);
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            margin: 1.1rem 0 0.65rem;
+        }
+
+        .reward-log-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid rgba(74,32,128,0.07);
+            font-size: 0.82rem;
+        }
+
+        .reward-log-item:last-child { border-bottom: none; }
+
+        .reward-log-desc { color: var(--text-dark); }
+
+        .reward-log-pts {
+            font-weight: 700;
+            color: #2e7d32;
+            font-size: 0.85rem;
+        }
+
+        .reward-log-pts.negative { color: #c62828; }
+
+        .no-rewards {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.82rem;
+            padding: 1rem 0;
+        }
+
+        /* ══════════════════════════════
+           SIT-IN HISTORY PANEL
+        ══════════════════════════════ */
+        .history-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid rgba(74,32,128,0.07);
+        }
+
+        .history-item:last-child { border-bottom: none; }
+
+        .history-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--purple), var(--purple-light));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .history-info { flex: 1; min-width: 0; }
+
+        .history-purpose {
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: var(--text-dark);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .history-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .history-status {
+            flex-shrink: 0;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 0.2rem 0.55rem;
+            border-radius: 20px;
+            align-self: center;
+        }
+
+        .status-done {
+            background: #ede8fa;
+            color: var(--purple);
+            border: 1px solid #c8b8f0;
+        }
+
+        .status-active {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #a5d6a7;
+        }
+
+        .history-viewall {
+            display: block;
+            text-align: center;
+            margin-top: 1rem;
+            padding: 0.5rem;
+            background: var(--gray);
+            border-radius: 8px;
+            color: var(--purple);
+            text-decoration: none;
+            font-size: 0.82rem;
+            font-weight: 700;
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .history-viewall:hover {
+            background: rgba(74,32,128,0.1);
+            color: var(--purple-dark);
+        }
+
+        .no-history {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.82rem;
+            padding: 1.5rem 0;
         }
 
         /* ══════════════════════════════
@@ -457,14 +724,18 @@ $announcements = $pdo->query("SELECT * FROM announcements ORDER BY created_at DE
         /* ══════════════════════════════
            RESPONSIVE
         ══════════════════════════════ */
-        @media (max-width: 960px) {
-            .dashboard-grid { grid-template-columns: 1fr 1fr; }
-            .panel:first-child { grid-column: 1 / -1; }
+        @media (max-width: 1400px) {
+            .dashboard-grid { grid-template-columns: 250px 220px 1fr 1fr !important; }
+            #rewards-panel { grid-column: 1 / -1; }
         }
 
-        @media (max-width: 600px) {
-            .dashboard-grid { grid-template-columns: 1fr; }
-            .panel:first-child { grid-column: auto; }
+        @media (max-width: 1200px) {
+            .dashboard-grid { grid-template-columns: 250px 220px 1fr !important; }
+            #rewards-panel { grid-column: auto; }
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid { grid-template-columns: 1fr !important; }
             nav { padding: 0 1rem; }
             main { padding: 1rem; }
         }
@@ -487,6 +758,7 @@ $announcements = $pdo->query("SELECT * FROM announcements ORDER BY created_at DE
         <li><a href="edit_profile.php">Edit Profile</a></li>
         <li><a href="history.php">History</a></li>
         <li><a href="reservation.php">Reservation</a></li>
+        <li><a href="#rewards-panel" onclick="document.getElementById('rewards-panel').scrollIntoView({behavior:'smooth'});return false;">🏆 Rewards</a></li>
         <li>
             <form method="POST" action="logout.php" style="display:inline;">
                 <button type="submit" class="btn-logout">Log out</button>
@@ -497,7 +769,7 @@ $announcements = $pdo->query("SELECT * FROM announcements ORDER BY created_at DE
 
 <!-- ==================== MAIN ==================== -->
 <main>
-    <div class="dashboard-grid">
+    <div class="dashboard-grid" style="grid-template-columns: 250px 220px 1fr 1fr 240px;">
 
         <!-- ── COLUMN 1: Student Info ── -->
         <div class="panel">
@@ -545,7 +817,47 @@ $announcements = $pdo->query("SELECT * FROM announcements ORDER BY created_at DE
             </div>
         </div>
 
-        <!-- ── COLUMN 2: Announcements ── -->
+        <!-- ── COLUMN 2: Sit-in History ── -->
+        <div class="panel">
+            <div class="panel-header">
+                🕘 Sit-in History
+            </div>
+            <div class="panel-body">
+
+                <?php if (empty($sitin_history)): ?>
+                    <div class="no-history">
+                        <div style="font-size:1.5rem;margin-bottom:0.4rem;">📋</div>
+                        No sit-in sessions yet.
+                    </div>
+                <?php else: ?>
+                    <?php foreach ($sitin_history as $h): ?>
+                    <div class="history-item">
+                        <div class="history-icon">💻</div>
+                        <div class="history-info">
+                            <div class="history-purpose"><?= htmlspecialchars($h['purpose']) ?></div>
+                            <div class="history-meta">
+                                🖥️ <?= htmlspecialchars($h['lab']) ?><br>
+                                📅 <?= date('M d, Y', strtotime($h['time_in'])) ?><br>
+                                ⏱️ <?= date('h:i A', strtotime($h['time_in'])) ?>
+                                <?php if ($h['time_out']): ?>
+                                    → <?= date('h:i A', strtotime($h['time_out'])) ?>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        <?php if ($h['time_out']): ?>
+                            <span class="history-status status-done">Done</span>
+                        <?php else: ?>
+                            <span class="history-status status-active">Active</span>
+                        <?php endif; ?>
+                    </div>
+                    <?php endforeach; ?>
+                    <a href="history.php" class="history-viewall">View All History →</a>
+                <?php endif; ?>
+
+            </div>
+        </div>
+
+        <!-- ── COLUMN 3: Announcements ── -->
         <div class="panel">
             <div class="panel-header">
                 📢 Announcement
@@ -611,6 +923,58 @@ $announcements = $pdo->query("SELECT * FROM announcements ORDER BY created_at DE
                         <span class="rule-text"><?= htmlspecialchars($rule) ?></span>
                     </div>
                 <?php endforeach; ?>
+
+            </div>
+        </div>
+
+        <!-- ── COLUMN 4: Rewards & Points ── -->
+        <div class="panel" id="rewards-panel">
+            <div class="panel-header">
+                🏆 Rewards &amp; Points
+            </div>
+            <div class="panel-body">
+
+                <div class="points-hero">
+                    <div class="points-circle">
+                        <span class="points-number"><?= (int)$student_points ?></span>
+                        <span class="points-label">Points</span>
+                    </div>
+                    <p class="points-subtitle">Your current reward points</p>
+                </div>
+
+                <div class="rewards-divider"></div>
+
+                <?php foreach ($tiers as $tier): ?>
+                <div class="rewards-tier <?= ($current_tier['key'] === $tier['key']) ? 'active-tier' : '' ?>">
+                    <span class="tier-icon"><?= $tier['icon'] ?></span>
+                    <div class="tier-info">
+                        <div class="tier-name"><?= $tier['name'] ?></div>
+                        <div class="tier-range"><?= $tier['range'] ?></div>
+                    </div>
+                    <?php if ($current_tier['key'] === $tier['key']): ?>
+                    <span class="tier-badge">You</span>
+                    <?php endif; ?>
+                </div>
+                <?php endforeach; ?>
+
+                <p class="rewards-history-title">Points History</p>
+
+                <?php if (empty($reward_logs)): ?>
+                    <div class="no-rewards">
+                        <div style="font-size:1.5rem;margin-bottom:0.3rem;">🎯</div>
+                        No point history yet.<br>
+                        <small>Earn points through sit-ins &amp; reservations!</small>
+                    </div>
+                <?php else: ?>
+                    <?php foreach ($reward_logs as $log): ?>
+                    <div class="reward-log-item">
+                        <span class="reward-log-desc"><?= htmlspecialchars($log['description']) ?></span>
+                        <span class="reward-log-pts <?= ($log['points'] < 0) ? 'negative' : '' ?>">
+                            <?= ($log['points'] >= 0 ? '+' : '') . (int)$log['points'] ?>
+                        </span>
+                    </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
 
             </div>
         </div>

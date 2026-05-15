@@ -414,10 +414,13 @@ $announcements = $pdo->query("SELECT * FROM announcements ORDER BY created_at DE
         <li><a href="admin_search.php">Search</a></li>
         <li><a href="admin_students.php">Students</a></li>
         <li><a href="admin_sitin.php">Sit-in</a></li>
-        <li><a href="admin_current_sitin.php">View Sit-in Records</a></li>
-        <li><a href="admin_sitin_reports.php">Sit-in Reports</a></li>
-        <li><a href="admin_feedback.php">Feedback Reports</a></li>
-        <li><a href="admin_reservation.php">Reservation</a></li>
+        <li><a href="admin_current_sitin.php">Current Sit-in</a></li>
+        <li><a href="admin_sitin_records.php">Sit-in Records</a></li>
+        <li><a href="admin_sitin_reports.php"> Reports</a></li>
+        <li><a href="admin_reservation.php"> Reservation</a></li>
+        <li><a href="admin_leaderboard.php"> Leaderboard</a></li>
+        <li><a href="admin_analytics.php"> Analytics</a></li>
+        <li><a href="admin_feedback.php"> Feedback</a></li>
         <li>
             <form method="POST" action="admin_logout.php" style="display:inline;">
                 <button type="submit" class="btn-logout">Log out</button>

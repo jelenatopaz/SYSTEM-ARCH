@@ -508,27 +508,7 @@ $currentSitins = $pdo->query("
 <body>
 
 <!-- ==================== NAVBAR ==================== -->
-<nav>
-    <span class="nav-brand">College of Computer Studies Admin</span>
-    <ul class="nav-links">
-        <li><a href="admin_dashboard.php">Home</a></li>
-        <li><a href="admin_search.php">Search</a></li>
-        <li><a href="admin_students.php">Students</a></li>
-        <li>
-            <!-- Sit-in: click → modal opens immediately (no page redirect) -->
-            <button class="btn-sitin-trigger" onclick="openSitinModal()">&#x2795; Sit-in</button>
-        </li>
-        <li><a href="admin_current_sitin.php">View Sit-in Records</a></li>
-        <li><a href="admin_sitin_reports.php">Sit-in Reports</a></li>
-        <li><a href="admin_feedback.php">Feedback Reports</a></li>
-        <li><a href="admin_reservation.php">Reservation</a></li>
-        <li>
-            <form method="POST" action="admin_logout.php" style="display:inline;">
-                <button type="submit" class="btn-logout">Log out</button>
-            </form>
-        </li>
-    </ul>
-</nav>
+<?php $active_page = 'sitin'; include 'admin_nav.php'; ?>
 
 <!-- ==================== MAIN ==================== -->
 <main>
